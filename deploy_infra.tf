@@ -1,78 +1,75 @@
-provider "kubernetes" {
-  config_path = "~/.kube/config"
+
+resource "time_sleep" "wait_for_kubernetes" {
+  create_duration = "20s"
 }
 
-resource "kubernetes_namespace" "monitoring" {
+resource "kubernetes_namespace" "kube_namespace" {
+  depends_on = [time_sleep.wait_for_kubernetes]
   metadata {
     name = "monitoring"
   }
 }
 
-
-resource "helm_release" "helm" {
-  name       = "helm"
-  repository = "https://charts.helm.sh/stable"
-  chart      = "helm"
-  version    = "3.5.4"
-  namespace  = kubernetes_namespace.monitoring.metadata[0].name
-}
 resource "helm_release" "prometheus" {
+  depends_on = [kubernetes_namespace.kube_namespace]
   name       = "prometheus"
   repository = "https://prometheus-community.github.io/helm-charts"
   chart      = "prometheus"
-  version    = "14.5.0"
-  namespace  = kubernetes_namespace.monitoring.metadata[0].name
+  namespace  = kubernetes_namespace.kube_namespace.metadata[0].name
+  create_namespace = true
+  version    = "25.26.0"
+  timeout = 2000
 
-  values = [
-    "https://raw.githubusercontent.com/prometheus-community/helm-charts/main/charts/prometheus/values.yaml"
-  ]
+
+  set {
+    name  = "podSecurityPolicy.enabled"
+    value = true
+  }
+
+  set {
+    name  = "server.persistentVolume.enabled"
+    value = false
+  }
+
+  set {
+    name  = "server\\.resources"
+    value = yamlencode({
+      limits = {
+        cpu    = "200m"
+        memory = "50Mi"
+      }
+      requests = {
+        cpu    = "100m"
+        memory = "30Mi"
+      }
+    })
+  }
 }
 
-resource "helm_release" "grafana" {
+ resource "helm_release" "grafana" {
+  depends_on = [kubernetes_namespace.kube_namespace]
   name       = "grafana"
   repository = "https://grafana.github.io/helm-charts"
   chart      = "grafana"
-  version    = "6.10.3"
-  namespace  = kubernetes_namespace.monitoring.metadata[0].name
+  version    = "8.5.0"
+  namespace  = kubernetes_namespace.kube_namespace.metadata[0].name
+  create_namespace = true
+  timeout = 2000
+  
 
-  values = [
-    "https://raw.githubusercontent.com/grafana/helm-charts/main/charts/grafana/values.yaml"
-  ]
+
+set {
+  name  = "grafana\\.resources"
+  value = yamlencode({
+    limits = {
+      cpu    = "200m"
+      memory = "50Mi"
+    }
+    requests = {
+      cpu    = "100m"
+      memory = "30Mi"
+    }
+  })
 }
 
-resource "kubernetes_service_account" "prometheus" {
-  metadata {
-    name      = "prometheus"
-    namespace = kubernetes_namespace.monitoring.metadata[0].name
-  }
-}
-
-resource "kubernetes_cluster_role" "prometheus" {
-  metadata {
-    name = "prometheus"
-  }
-
-  rule {
-    api_groups = ["*"]
-    resources  = ["*"]
-    verbs      = ["get", "list", "watch"]
-  }
-}
-
-resource "kubernetes_cluster_role_binding" "prometheus" {
-  metadata {
-    name = "prometheus"
-  }
-
-  role_ref {
-    api_group = "rbac.authorization.k8s.io"
-    kind      = "ClusterRole"
-    name      = kubernetes_cluster_role.prometheus.metadata[0].name
-  }
-
-  subject {
-    kind      = "ServiceAccount"
-    name      = kubernetes_service_account.prometheus.metadata[0].name
-    namespace = kubernetes_namespace.monitoring.metadata[0].name
-  }
 }
